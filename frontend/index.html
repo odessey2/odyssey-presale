@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ODX Presale</title>
+<style>
+:root{--bg:#0f1420;--card:#171e2e;--tx:#e8ecf4;--mut:#8b97b0;--ac:#4f8cff;--ok:#3ecf8e;--er:#ff6b6b;--bd:#26304a}
+@media (prefers-color-scheme:light){:root{--bg:#f3f5fa;--card:#fff;--tx:#162036;--mut:#5d6a85;--ac:#2f6df0;--ok:#12915b;--er:#d63c3c;--bd:#dde3ef}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,Segoe UI,Arial,sans-serif}
+.wrap{max-width:560px;margin:0 auto;padding:16px}
+header{display:flex;justify-content:space-between;align-items:center;margin:8px 0 16px}
+h1{font-size:22px;margin:0}h2{font-size:16px;margin:0 0 12px}
+.banner{background:#7a5b00;color:#fff;padding:8px 12px;border-radius:8px;font-size:14px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid span{display:block;color:var(--mut);font-size:13px}.grid b{font-size:17px}
+.bar{height:8px;background:var(--bd);border-radius:4px;margin:14px 0 4px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--ac)}
+small,.mut{color:var(--mut);font-size:13px}
+label{display:block;margin:10px 0 4px;font-size:14px;color:var(--mut)}
+input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);font-size:16px}
+button{padding:11px 16px;border:0;border-radius:8px;background:var(--ac);color:#fff;font-size:16px;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+#buy,#claim{width:100%;margin-top:12px}
+#est{margin-top:10px;min-height:24px}
+#msg{margin-top:10px;font-size:14px;word-break:break-word}
+.ok{color:var(--ok)}.bad{color:var(--er)}
+a{color:var(--ac)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="banner" id="net">TESTNET (Sepolia): test tokens only, no real value.</div>
+  <header><h1>ODX Presale</h1><button id="conn">Connect wallet</button></header>
+
+  <section class="card">
+    <h2>Current round</h2>
+    <div class="grid">
+      <div><span>Round</span><b id="rnd">-</b></div>
+      <div><span>Price</span><b id="prc">-</b></div>
+      <div><span>Left in round</span><b id="rem">-</b></div>
+      <div><span id="lbl">Round ends in</span><b id="left">-</b></div>
+    </div>
+    <div class="bar"><i id="bari"></i></div>
+    <small id="sold"></small>
+  </section>
+
+  <section class="card">
+    <h2>Buy ODX</h2>
+    <label for="asset">Pay with</label>
+    <select id="asset"><option>ETH</option><option>USDC</option><option>USDT</option></select>
+    <label for="amt">Amount (<span id="unit">ETH</span>)</label>
+    <input id="amt" type="number" min="0" step="any" placeholder="0.0">
+    <small id="bal"></small>
+    <div id="est"></div>
+    <small>Min $80 per purchase. Max $2,000 per wallet in total. Rounds 1 to 5: max $700 per wallet per round. A purchase over a limit is rejected, not partly filled.</small>
+    <button id="buy" disabled>Connect wallet first</button>
+    <div id="msg"></div>
+  </section>
+
+  <section class="card">
+    <h2>Your tokens</h2>
+    <div class="grid">
+      <div><span>Bought</span><b id="pur">-</b></div>
+      <div><span>Claimable now</span><b id="clm">-</b></div>
+      <div><span>Unlocked</span><b id="unl">-</b></div>
+      <div><span>Spend left (USD)</span><b id="alw">-</b></div>
+    </div>
+    <small>Claims: 40% when the presale ends, 30% after 30 days, 30% after 90 days.</small>
+    <button id="claim" disabled>Claim</button>
+  </section>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script>
+// ===== CONFIG: change only this block (e.g. for mainnet) =====
+const CFG = {
+  testnet: true,
+  chainId: 11155111, chainName: "Sepolia",
+  rpc: "https://ethereum-sepolia-rpc.publicnode.com",
+  explorer: "https://sepolia.etherscan.io",
+  presale: "0x41968b36E66E756dCdCa0A81F4d442F10AF3D92b",
+  usdc: "0x9389E3fE918eDcf1bb20a802Ec29A63DeCb825ff",
+  usdt: "0xa2a6f79CC38C1D14F105ba1ac87e2928BaE34ca9"
+};
+// =============================================================
+for (const k of ["presale", "usdc", "usdt"]) CFG[k] = CFG[k].toLowerCase();
+
+const ABI = [
+  "function saleState() view returns (uint256 roundIndex,uint256 priceUsd18,uint256 remainingTokens,uint256 roundEndsAt,bool ended)",
+  "function totalSold() view returns (uint256)",
+  "function startTime() view returns (uint256)",
+  "function ethUsdFeed() view returns (address)",
+  "function remainingAllowanceUsd(address) view returns (uint256)",
+  "function purchased(address) view returns (uint256)",
+  "function claimable(address) view returns (uint256)",
+  "function unlockedPercent() view returns (uint256)",
+  "function buyWithETH() payable",
+  "function buyWithToken(address asset,uint256 amount)",
+  "function claim()"
+];
+const ERC = [
+  "function balanceOf(address) view returns (uint256)",
+  "function allowance(address,address) view returns (uint256)",
+  "function approve(address,uint256) returns (bool)"
+];
+const FEED = ["function latestRoundData() view returns (uint80,int256,uint256,uint256,uint80)"];
+
+const $ = (id) => document.getElementById(id);
+const rp = new ethers.JsonRpcProvider(CFG.rpc, CFG.chainId, { staticNetwork: true });
+const P = (s) => new ethers.Contract(CFG.presale, ABI, s || rp);
+const num = (x, d = 18) => Number(ethers.formatUnits(x, d));
+const f = (n, m = 4) => n.toLocaleString(undefined, { maximumFractionDigits: m });
+let signer = null, acct = null, ethUsd = 0, S = null, A = 0, bals = {};
+
+if (!CFG.testnet) $("net").style.display = "none";
+
+function say(t, c) { const m = $("msg"); m.textContent = t; m.className = c || ""; }
+function err(e) {
+  if (e && e.code === "ACTION_REJECTED") return "Cancelled in your wallet.";
+  return (e && (e.reason || e.shortMessage || e.message)) || "Unknown error";
+}
+
+async function ensureNet() {
+  const hex = "0x" + CFG.chainId.toString(16);
+  const cur = await window.ethereum.request({ method: "eth_chainId" });
+  if (cur === hex) return;
+  try {
+    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hex }] });
+  } catch (e) {
+    if (e.code === 4902) {
+      await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{
+        chainId: hex, chainName: CFG.chainName, rpcUrls: [CFG.rpc],
+        nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, blockExplorerUrls: [CFG.explorer] }] });
+    } else throw e;
+  }
+}
+
+async function connect() {
+  if (!window.ethereum) { say("No wallet found. Install MetaMask or open this page in a wallet browser.", "bad"); return; }
+  try {
+    await new ethers.BrowserProvider(window.ethereum).send("eth_requestAccounts", []);
+    await ensureNet();
+    signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+    acct = await signer.getAddress();
+    $("conn").textContent = acct.slice(0, 6) + "..." + acct.slice(-4);
+    say("");
+    await refresh();
+  } catch (e) { say(err(e), "bad"); }
+}
+
+async function refresh() {
+  try {
+    const p = P();
+    const [s, sold, start, fa] = await Promise.all([p.saleState(), p.totalSold(), p.startTime(), p.ethUsdFeed()]);
+    const fd = await new ethers.Contract(fa, FEED, rp).latestRoundData();
+    ethUsd = num(fd[1], 8);
+    S = { r: Number(s.roundIndex), price: num(s.priceUsd18), rem: num(s.remainingTokens),
+          end: Number(s.roundEndsAt), ended: s.ended, start: Number(start) };
+    const now = Date.now() / 1000;
+    $("rnd").textContent = S.ended ? "Ended" : (S.r + 1) + " of 17";
+    $("prc").textContent = S.ended ? "-" : "$" + f(S.price, 6);
+    $("rem").textContent = S.ended ? "-" : f(S.rem, 0) + " ODX";
+    $("lbl").textContent = now < S.start ? "Starts in" : "Round ends in";
+    const tot = num(sold);
+    $("bari").style.width = Math.min(100, tot / 3e6) + "%";
+    $("sold").textContent = f(tot, 0) + " of 300,000,000 ODX sold";
+
+    if (acct) {
+      const usdc = new ethers.Contract(CFG.usdc, ERC, rp), usdt = new ethers.Contract(CFG.usdt, ERC, rp);
+      const [al, pu, cl, up, eb, ub, tb] = await Promise.all([
+        p.remainingAllowanceUsd(acct), p.purchased(acct), p.claimable(acct), p.unlockedPercent(),
+        rp.getBalance(acct), usdc.balanceOf(acct), usdt.balanceOf(acct)]);
+      A = num(al);
+      bals = { ETH: num(eb), USDC: num(ub, 6), USDT: num(tb, 6) };
+      $("pur").textContent = f(num(pu), 2) + " ODX";
+      $("clm").textContent = f(num(cl), 2) + " ODX";
+      $("unl").textContent = up.toString() + "%";
+      $("alw").textContent = "$" + f(A, 2);
+      $("claim").disabled = cl === 0n;
+      $("claim").textContent = "Claim";
+    }
+    upd();
+  } catch (e) { say("Could not read the contract: " + err(e), "bad"); }
+}
+
+function usdOf() {
+  const v = parseFloat($("amt").value);
+  if (!(v > 0)) return 0;
+  return $("asset").value === "ETH" ? v * ethUsd : v;
+}
+
+function upd() {
+  const a = $("asset").value;
+  $("unit").textContent = a;
+  $("bal").textContent = acct && bals[a] !== undefined ? "Your balance: " + f(bals[a], 6) + " " + a : "";
+  const btn = $("buy");
+  if (!acct) { btn.disabled = true; btn.textContent = "Connect wallet first"; $("est").textContent = ""; return; }
+  btn.textContent = "Buy ODX";
+  const usd = usdOf();
+  const est = $("est");
+  est.className = "";
+  if (!S || S.ended) { btn.disabled = true; est.textContent = "The presale has ended."; return; }
+  if (Date.now() / 1000 < S.start) { btn.disabled = true; est.textContent = "The presale has not started yet."; return; }
+  if (usd <= 0) { btn.disabled = true; est.textContent = ""; return; }
+  btn.disabled = false;
+  let t = "About $" + f(usd, 2) + " = about " + f(usd / S.price, 2) + " ODX (estimate, round " + (S.r + 1) + " price)";
+  if (usd < 80) { t = "Below the $80 minimum. The purchase will be rejected."; est.className = "bad"; }
+  else if (usd > A) { t = "Above your remaining limit of $" + f(A, 2) + ". The purchase will be rejected."; est.className = "bad"; }
+  est.textContent = t;
+}
+
+async function buy() {
+  $("buy").disabled = true;
+  try {
+    await ensureNet();
+    signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+    const a = $("asset").value, raw = $("amt").value.trim(), p = P(signer);
+    let tx;
+    if (a === "ETH") {
+      say("Confirm the purchase in your wallet...");
+      tx = await p.buyWithETH({ value: ethers.parseEther(raw) });
+    } else {
+      const addr = CFG[a.toLowerCase()], amt = ethers.parseUnits(raw, 6);
+      const t = new ethers.Contract(addr, ERC, signer);
+      const al = await t.allowance(acct, CFG.presale);
+      if (al < amt) {
+        if (a === "USDT" && al > 0n) { say("Step 1: resetting old USDT approval..."); await (await t.approve(CFG.presale, 0)).wait(); }
+        say("Approve " + a + " in your wallet...");
+        await (await t.approve(CFG.presale, amt)).wait();
+        say("Now confirm the purchase in your wallet...");
+      }
+      tx = await p.buyWithToken(addr, amt);
+    }
+    say("Waiting for confirmation...");
+    await tx.wait();
+    say("Purchase complete. You can claim your tokens after the presale ends.", "ok");
+    $("amt").value = "";
+  } catch (e) { say(err(e), "bad"); }
+  await refresh();
+}
+
+async function claim() {
+  $("claim").disabled = true;
+  try {
+    await ensureNet();
+    signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+    say("Confirm the claim in your wallet...");
+    await (await P(signer).claim()).wait();
+    say("Tokens claimed.", "ok");
+  } catch (e) { say(err(e), "bad"); }
+  await refresh();
+}
+
+setInterval(() => {
+  if (!S) return;
+  const now = Date.now() / 1000;
+  if (S.ended) { $("left").textContent = "-"; return; }
+  let t = Math.floor((now < S.start ? S.start : S.end) - now);
+  if (t < 0) t = 0;
+  const d = Math.floor(t / 86400), h = Math.floor(t % 86400 / 3600), m = Math.floor(t % 3600 / 60);
+  $("left").textContent = d + "d " + h + "h " + m + "m";
+}, 1000);
+
+$("conn").onclick = connect;
+$("buy").onclick = buy;
+$("claim").onclick = claim;
+$("amt").oninput = upd;
+$("asset").onchange = () => { $("amt").value = ""; upd(); };
+if (window.ethereum) {
+  window.ethereum.on("accountsChanged", () => location.reload());
+  window.ethereum.on("chainChanged", () => location.reload());
+}
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
+

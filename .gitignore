@@ -1,0 +1,11 @@
+node_modules
+.env
+cache
+artifacts
+.wallets.json
+.env.*
+coverage
+coverage.json
+
+*.bak
+*.zip
