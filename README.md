@@ -40,3 +40,7 @@ Monitoring (Tenderly or OpenZeppelin Defender-style alerts) and an audit firm.
 8. Legal review and geo-restriction before opening to the public.
 
 Never put private keys in the repo or share them with anyone.
+
+## Audit
+
+This project has been audited by CertiK. The audit report details (date, audited commit, and public report link) will be added here.
