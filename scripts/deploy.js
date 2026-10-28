@@ -1,11 +1,13 @@
 // Usage: npx hardhat run scripts/deploy.js --network sepolia
-// Mainnet: only after an audit, and after a full dry run on a testnet.
+// Mainnet: only after an audit, and after a full dry run (scripts/dry-run-fork.js).
 require("dotenv").config();
 const { ethers, network } = require("hardhat");
 
 const E = (n) => ethers.parseEther(String(n));
 const MONTH = 30 * 24 * 3600;
-const IS_MAINNET = network.name === "mainnet";
+// FORK_DRY_RUN=1 is set only by scripts/dry-run-fork.js: a local fork of mainnet is treated exactly like mainnet
+const FORK_DRY_RUN = process.env.FORK_DRY_RUN === "1" && network.name === "hardhat";
+const IS_MAINNET = network.name === "mainnet" || FORK_DRY_RUN;
 
 // Chainlink + token addresses on Ethereum mainnet. VERIFY each one on
 // docs.chain.link and etherscan.io before deploying.
@@ -32,7 +34,7 @@ async function deployWait(factory, ...args) {
 
 async function main() {
   const [deployer] = await ethers.getSigners();
-  console.log("Network:", network.name, "| Deployer:", deployer.address);
+  console.log("Network:", network.name, FORK_DRY_RUN ? "(local fork of mainnet, dry run)" : "", "| Deployer:", deployer.address);
   const bal = await ethers.provider.getBalance(deployer.address);
   console.log("Deployer ETH:", ethers.formatEther(bal));
   if (!IS_MAINNET && bal < ethers.parseEther("0.02")) {
@@ -101,11 +103,14 @@ async function main() {
   });
   const presaleAddr = await presale.getAddress();
 
+  const vestings = {};
   const Vesting = await ethers.getContractFactory("OdysseyVesting");
   async function vest(label, beneficiary, amount, cliffMonths, durationMonths) {
     const v = await deployWait(Vesting, tokenAddr, presaleAddr, beneficiary, cliffMonths * MONTH, durationMonths * MONTH);
-    await (await token.transfer(await v.getAddress(), E(amount))).wait();
-    console.log(`${label} vesting:`, await v.getAddress());
+    const vAddr = await v.getAddress();
+    await (await token.transfer(vAddr, E(amount))).wait();
+    vestings[label] = vAddr;
+    console.log(`${label} vesting:`, vAddr);
   }
 
   // Allocation (whitepaper section 5). Months are 30 days.
@@ -130,6 +135,13 @@ async function main() {
   console.log("Treasury (gets 100% of every payment at once):", w.treasuryMultisig);
   console.log("Liquidity wallet (gets 180M ODX):", w.liquidityWallet);
   console.log("Next: verify all contracts on Etherscan and publish the addresses.");
+
+  return { token, presale, tokenAddr, presaleAddr, wallets: w, vestings, startTime, feeds };
 }
 
-main().catch((e) => { console.error(e); process.exitCode = 1; });
+module.exports = { main };
+
+// scripts/dry-run-fork.js sets DEPLOY_NO_AUTORUN=1 so that it can call main() itself and then check the result
+if (process.env.DEPLOY_NO_AUTORUN !== "1") {
+  main().catch((e) => { console.error(e); process.exitCode = 1; });
+}
